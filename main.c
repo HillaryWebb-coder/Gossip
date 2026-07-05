@@ -90,9 +90,7 @@ void *send_message(void *arg)
     {
         char *msg = malloc(sizeof(char) * MAXBUFLEN);
 
-        pthread_mutex_lock(&ui_mutex);
         read_input(msg, MAXBUFLEN);
-        pthread_mutex_unlock(&ui_mutex);
 
         numbytes = sendto(sockfd, msg, strlen(msg), 0, (struct sockaddr *)&recv_addr, sizeof recv_addr);
 
