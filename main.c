@@ -51,6 +51,38 @@ void *get_in_addr(struct sockaddr *sa)
     return &(((struct sockaddr_in6 *)sa)->sin6_addr);
 }
 
+#include <ifaddrs.h>
+#include <net/if.h>
+
+int get_local_ip(char *buf, size_t buflen) {
+    struct ifaddrs *ifaddr, *ifa;
+
+    if (getifaddrs(&ifaddr) == -1) {
+        perror("getifaddrs");
+        return -1;
+    }
+
+    for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+        if (ifa->ifa_addr == NULL) continue;
+
+        // IPv4 only
+        if (ifa->ifa_addr->sa_family != AF_INET) continue;
+
+        // skip loopback
+        if (ifa->ifa_flags & IFF_LOOPBACK) continue;
+
+        inet_ntop(AF_INET,
+                  &((struct sockaddr_in *)ifa->ifa_addr)->sin_addr,
+                  buf, buflen);
+
+        freeifaddrs(ifaddr);
+        return 0;
+    }
+
+    freeifaddrs(ifaddr);
+    return -1; // no suitable interface found
+}
+
 void *send_message(void *arg)
 {
     struct send_thread_args *send_th_args = (struct send_thread_args *)arg;
@@ -179,24 +211,14 @@ void *recieve_message(void *arg)
         buf[numbytes] = '\0';
 
         char host[INET_ADDRSTRLEN];
-        struct hostent *host_entry;
-        struct in_addr host_addr;
+        struct in_addr host_ip;
         char separator[3] = "<<";
+        
+        get_local_ip(host, sizeof host);
+        inet_pton(AF_INET, host, &host_ip);
 
-        if(gethostname(host, sizeof host) == -1){
-            perror("gethostname");
-            exit(1);
-        }
-
-        host_entry = gethostbyname(host);
-        if(host_entry == NULL){
-            perror("getbyhostname");
-            exit(1);
-        }
-
-        memcpy(&host_addr, host_entry->h_addr_list[0], sizeof(struct in_addr));
         uint32_t their_addr_int = ntohl(((struct sockaddr_in *)&their_addr)->sin_addr.s_addr);
-        uint32_t host_addr_int = ntohl(host_addr.s_addr);
+        uint32_t host_addr_int = ntohl(host_ip.s_addr);
         
         snprintf(separator, sizeof separator, "%s", their_addr_int == host_addr_int ? "<<" : ">>");
  
