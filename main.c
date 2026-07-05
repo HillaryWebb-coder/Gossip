@@ -220,7 +220,7 @@ void *recieve_message(void *arg)
         uint32_t their_addr_int = ntohl(((struct sockaddr_in *)&their_addr)->sin_addr.s_addr);
         uint32_t host_addr_int = ntohl(host_ip.s_addr);
         
-        snprintf(separator, sizeof separator, "%s", their_addr_int == host_addr_int ? "<<" : ">>");
+        snprintf(separator, sizeof separator, "%s", their_addr_int == host_addr_int ? ">>" : "<<");
  
         pthread_mutex_lock(&ui_mutex);
         print_message(separator, buf);
