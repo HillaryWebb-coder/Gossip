@@ -1,9 +1,9 @@
-INC_DIR = .
+INC_DIR = inc/
 
 CC = gcc
 CFLAGS = -Wall -I${INC_DIR} -L/usr/lib 
 
-server: *.c
+server: src/*.c
 	mkdir -p build
 	${CC} ${CFLAGS} -o build/$@ $^ -lncurses
 
