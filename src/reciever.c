@@ -23,7 +23,6 @@ void *recieve_message(void *arg)
     int rv;
     int numbytes;
     struct sockaddr_storage their_addr;
-    char buf[MAXBUFLEN];
     socklen_t addr_len;
 
     memset(&hints, 0, sizeof(hints));
@@ -39,10 +38,16 @@ void *recieve_message(void *arg)
 
     for (p = servinfo; p != NULL; p = p->ai_next)
     {
-        check_result((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)), "listener: socket");
-
-        check_result(bind(sockfd, p->ai_addr, p->ai_addrlen), "listener: bind");
-
+        if((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1){
+            perror("listener: socket");
+            continue;
+        }
+        
+        if(bind(sockfd, p->ai_addr, p->ai_addrlen) == -1){
+            close(sockfd);
+            perror("listener: bind");
+            continue;
+        }
         break;
     }
 
@@ -57,26 +62,29 @@ void *recieve_message(void *arg)
     {
 
         addr_len = sizeof their_addr;
-        check_result((numbytes = recvfrom(sockfd, buf, MAXBUFLEN - 1, 0, (struct sockaddr *)&their_addr, &addr_len)), "recvfrom");
-
-        buf[numbytes] = '\0';
-
-        char hostname[128];
-        struct hostent *he;
-        char separator[3] = "<<";
+        char buf[MAXBUFLEN + sizeof(GossipHeader_t)];
+        check_result((numbytes = recvfrom(sockfd, buf, MAXBUFLEN + sizeof(GossipHeader_t) - 1, 0, (struct sockaddr *)&their_addr, &addr_len)), "recvfrom");
         
-        gethostname(hostname, sizeof hostname);
-        if((he = gethostbyname(hostname)) == NULL){
-            herror("gethostbyname");
+        GossipHeader_t *hdr = (GossipHeader_t *)buf;
+        if(ntohs(hdr->signature) != GOSSIP_SIGN){
+            continue; // Invalid Packet
         }
 
-        uint32_t their_addr_int = ntohl(((struct sockaddr_in *)&their_addr)->sin_addr.s_addr);
-        uint32_t host_addr_int = ntohl(((struct in_addr *)he->h_addr_list[0])->s_addr);
-        
-        snprintf(separator, sizeof separator, "%s", their_addr_int == host_addr_int ? ">>" : "<<");
+        uint32_t sent_at = ntohl(hdr->timestamp);
+        uint32_t ttl = ntohl(hdr->ttl);
+        uint32_t now = (uint32_t)time(NULL);
+
+        if(now - sent_at > ttl) continue; // discard expired messages
+
+        if(ntohl(hdr->sender_id) == my_id) continue; // discard own messages
+
+        char *message = buf + sizeof(GossipHeader_t); // set message pointer to message location in buffer
+        message[ntohs(hdr->payload_len)] = '\0';
+
+        char separator[3] = "<<";
  
         pthread_mutex_lock(&ui_mutex);
-        print_message(separator, buf);
+        print_message(separator, message, sent_at);
         pthread_mutex_unlock(&ui_mutex);
     }
 

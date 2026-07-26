@@ -21,6 +21,7 @@
 
 
 #define MAXBUFLEN 500
+uint32_t my_id;
 
 uint32_t gen_port_from_pass(char *passphrase);
 void *get_in_addr(struct sockaddr *sa);
@@ -40,6 +41,9 @@ int main(int argc, char *argv[])
     pthread_t send_threadID;
 
     init_ui();
+
+    srand(time(NULL));
+    my_id = (uint32_t)rand();
 
     status = pthread_create(&send_threadID, NULL, send_message, (void *)&secret_port);
     if (status != 0)

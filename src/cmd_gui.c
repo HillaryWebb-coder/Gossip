@@ -29,8 +29,8 @@ void init_ui(){
     wrefresh(input_win);
 }
 
-void print_message(const char *prefix, const char *msg){
-    time_t now = time(NULL);
+void print_message(const char *prefix, const char *msg, uint32_t timestamp){
+    time_t now = (time_t) timestamp;
     struct tm *local_time = localtime(&now);
 
     wprintw(msg_win, "%02d: %02d %s %s\n", local_time->tm_hour, local_time->tm_min, prefix, msg);
