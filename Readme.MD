@@ -16,11 +16,17 @@ The core concept is borrowed from tradecraft. Instead of connecting to a server,
 passphrase → SHA-256 → first 4 bytes → uint32 → map to ephemeral port range (49152–65535)
 ```
 
-Both nodes run this derivation independently and arrive at the same port. One binds and listens. The other sends. No handshake, no directory, no coordination — the passphrase *is* the address.
+Both nodes run this derivation independently and arrive at the same port. One binds and listens. The other sends to the network's broadcast address on that port. No handshake, no directory, no coordination — the passphrase *is* the address.
 
-### Sender identity
+### Packet header
 
-Every packet is prefixed with a 4-byte sender ID generated randomly at startup. The receive thread checks this ID against its own — packets originating from the same node are silently discarded, preventing the UDP socket from echoing your own transmissions back into the chat window.
+Every packet is framed with a binary header:
+
+```
+[signature: 2B][version: 1B][sender_id: 4B][timestamp: 4B][ttl: 4B][payload_len: 2B][payload...]
+```
+
+The signature validates that a packet is a genuine Gossip packet — stray UDP traffic on the derived port is discarded. The sender ID filters the node's own transmissions, which are visible on the socket because UDP broadcast is used. The timestamp and TTL allow the receiver to discard packets that are stale in transit.
 
 ### Terminal UI
 
@@ -30,8 +36,8 @@ A two-panel ncurses interface keeps sent and received messages in a scrolling ch
 
 ```
 main
-├── send_thread    — reads input, prefixes sender ID, transmits via sendto()
-└── recv_thread    — binds derived port, loops on recvfrom(), filters own packets, prints to chat
+├── send_thread    — reads input, builds packet, derives broadcast address, transmits via sendto()
+└── recv_thread    — binds derived port, loops on recvfrom(), validates header, prints to chat
 ```
 
 Both threads share the ncurses UI state, protected by `ui_mutex`.
@@ -43,15 +49,14 @@ Both threads share the ncurses UI state, protected by `ui_mutex`.
 | Feature | Status |
 |---|---|
 | Passphrase → port derivation (SHA-256) | ✅ |
-| Raw UDP send / receive | ✅ |
+| Raw UDP broadcast send / receive | ✅ |
+| Binary packet header framing | ✅ |
 | Sender ID stamping and filtering | ✅ |
+| Packet TTL — stale packet rejection | ✅ |
 | ncurses terminal UI | ✅ |
 | Concurrent send + receive threads | ✅ |
-| Packet TTL and ephemeral message reaping | 🔧 In progress |
-| Binary packet framing (header + checksum) | 🔧 Planned |
 | Message fragmentation and reassembly | 🔧 Planned |
-
-Ephemerality — the defining property of a true dead-drop — is the next milestone. Each packet will carry a TTL field; a background reaper thread will evict incomplete or uncollected message buffers once their TTL expires.
+| XOR stream cipher | 🔧 Planned |
 
 ---
 
@@ -73,10 +78,8 @@ Or manually:
 
 ```bash
 mkdir build/
-gcc -Wall -I. -o build/server main.c cmd_gui.c sha256.c -lncurses -lpthread
+gcc -Wall -I. -o build/server main.c sender.c receiver.c cmd_gui.c sha256.c -lncurses -lpthread
 ```
-
-> Note: the Makefile does not currently pass `-lpthread`. If the build fails with undefined pthread references, add it to `CFLAGS` or link manually as above.
 
 ---
 
@@ -86,15 +89,15 @@ Both nodes must be on the same network and use the same passphrase.
 
 **Node A:**
 ```bash
-./build/server mysecretphrase 192.168.0.255
+./build/server mysecretphrase
 ```
 
 **Node B:**
 ```bash
-./build/server mysecretphrase 192.168.0.255
+./build/server mysecretphrase
 ```
 
-Both nodes derive the same port from `mysecretphrase`. Node A listens and sends to Node B's IP; Node B does the same in reverse. Messages appear in the chat window as they arrive.
+Both nodes independently derive the same port from `mysecretphrase`. Packets are sent to the subnet broadcast address so no IP configuration is needed — any node on the network with the correct passphrase will receive them.
 
 ---
 
@@ -103,6 +106,10 @@ Both nodes derive the same port from `mysecretphrase`. Node A listens and sends 
 ```
 .
 ├── main.c          — entry point, thread orchestration, port derivation
+├── main.h          — shared types, GossipHeader_t, constants
+├── sender.c        — send thread, broadcast address derivation, packet assembly
+├── sender.h
+├── receiver.c      — receive thread, header validation, TTL check, message display
 ├── cmd_gui.c       — ncurses UI (init, print_message, read_input, close)
 ├── cmd_gui.h       — UI interface and shared ui_mutex declaration
 ├── sha256.c        — SHA-256 implementation
@@ -115,18 +122,18 @@ Both nodes derive the same port from `mysecretphrase`. Node A listens and sends 
 ## Concepts explored
 
 - Raw UDP socket programming (BSD sockets API)
+- UDP broadcast — subnet-wide delivery without a target IP
 - Deterministic port derivation from a cryptographic hash
+- Binary protocol design — custom wire format with versioning
 - POSIX threads — concurrent send/receive with mutex synchronisation
 - ncurses terminal UI with thread-safe rendering
-- Packet identity and filtering without a connection handshake
-- Protocol design from first principles
+- Network byte order — correct use of `htons`, `htonl`, `ntohs`, `ntohl`
+- Packet validation — signature checks, TTL expiry, sender filtering
 
 ---
 
 ## Planned
 
-- **TTL reaper thread** — background goroutine evicting expired message buffers
-- **Binary packet header** — magic bytes, sequence number, TTL field, checksum
 - **Message fragmentation** — split messages exceeding MTU across multiple datagrams, reassemble on receipt
 - **XOR stream cipher** — keystream derived from passphrase, applied over payload before transmission
 
